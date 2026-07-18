@@ -1,0 +1,53 @@
+Testing TEMA-MACD D
+
+N50 trade_count=11667
+PASS D N50 avg_return_pct: actual=1.15, expected=1.15, delta=0.00, tolerance=2.00
+PASS D N50 win_rate_pct: actual=41.97, expected=41.90, delta=0.07, tolerance=5.00
+PASS D N50 median_duration_days: actual=15.00, expected=15.00, delta=0.00, tolerance=10.00
+
+N150 trade_count=24671
+PASS D N150 avg_return_pct: actual=1.61, expected=1.59, delta=0.02, tolerance=2.00
+PASS D N150 win_rate_pct: actual=40.42, expected=40.29, delta=0.13, tolerance=5.00
+PASS D N150 median_duration_days: actual=15.00, expected=15.00, delta=0.00, tolerance=10.00
+
+N250 trade_count=33368
+PASS D N250 avg_return_pct: actual=1.94, expected=1.94, delta=0.00, tolerance=2.00
+PASS D N250 win_rate_pct: actual=39.48, expected=39.39, delta=0.09, tolerance=5.00
+PASS D N250 median_duration_days: actual=15.00, expected=15.00, delta=0.00, tolerance=10.00
+
+Testing TEMA-MACD W
+
+N50 trade_count=2348
+PASS W N50 avg_return_pct: actual=8.37, expected=8.46, delta=0.09, tolerance=2.00
+PASS W N50 win_rate_pct: actual=46.34, expected=46.56, delta=0.22, tolerance=5.00
+PASS W N50 median_duration_days: actual=77.00, expected=77.00, delta=0.00, tolerance=10.00
+
+N150 trade_count=5015
+PASS W N150 avg_return_pct: actual=9.40, expected=9.47, delta=0.07, tolerance=2.00
+PASS W N150 win_rate_pct: actual=44.05, expected=44.19, delta=0.14, tolerance=5.00
+PASS W N150 median_duration_days: actual=77.00, expected=77.00, delta=0.00, tolerance=10.00
+
+N250 trade_count=6566
+PASS W N250 avg_return_pct: actual=11.77, expected=11.86, delta=0.09, tolerance=2.00
+PASS W N250 win_rate_pct: actual=42.86, expected=43.16, delta=0.30, tolerance=5.00
+PASS W N250 median_duration_days: actual=77.00, expected=77.00, delta=0.00, tolerance=10.00
+
+TEMA-MACD MTF Performance (D entry within W bull)
+
+N50
+Trade Count           : 5429
+Avg Return per Trade  : 1.12%
+Win Rate              : 42.09%
+Median Trade Duration : 13.00 days
+
+N150
+Trade Count           : 11118
+Avg Return per Trade  : 1.85%
+Win Rate              : 40.81%
+Median Trade Duration : 13.00 days
+
+N250
+Trade Count           : 14746
+Avg Return per Trade  : 2.53%
+Win Rate              : 40.42%
+Median Trade Duration : 13.00 days

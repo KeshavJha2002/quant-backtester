@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13"]
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Install locked environment
+        env:
+          UV_LINK_MODE: copy
+        run: uv sync --frozen --all-extras
+
+      - name: Lint
+        run: |
+          uv run ruff check .
+          uv run ruff format --check .
+
+      - name: Run deterministic tests
+        env:
+          PYTHONHASHSEED: "0"
+          TZ: UTC
+        run: |
+          uv run pytest -q -m "not network and not slow" --cov=trading_bot --cov-report=term-missing
+
+      - name: Build distributions
+        run: |
+          uv run python -m build
+          uv run python -m twine check dist/*
+
+      - name: Audit dependencies
+        if: matrix.python-version == '3.11'
+        run: uv run pip-audit

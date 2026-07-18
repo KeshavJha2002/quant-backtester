@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="900" viewBox="0 0 1200 900" role="img" aria-labelledby="title desc">
+  <title id="title">Strategy Research Flow</title>
+  <desc id="desc">Flow from NSE universe data through standalone strategies, multi-timeframe filters, c3/c5/c6 combinations, backtests, portfolio simulation, and README artifacts.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#1e1e1e"/>
+    </marker>
+    <style>
+      .title { font: 700 30px Arial, sans-serif; fill: #1e1e1e; }
+      .label { font: 600 19px Arial, sans-serif; fill: #1e1e1e; }
+      .small { font: 600 16px Arial, sans-serif; fill: #1e1e1e; }
+      .box { stroke-width: 3; rx: 16; ry: 16; }
+      .arrow { fill: none; stroke: #1e1e1e; stroke-width: 3; marker-end: url(#arrow); }
+    </style>
+  </defs>
+  <rect width="1200" height="900" fill="#ffffff"/>
+  <text class="title" x="600" y="70" text-anchor="middle">Strategy Research Flow</text>
+
+  <rect class="box" x="70" y="155" width="190" height="95" fill="#c3fae8" stroke="#06b6d4"/>
+  <text class="label" x="165" y="194" text-anchor="middle">NSE universe</text>
+  <text class="label" x="165" y="221" text-anchor="middle">N50/N150/N250</text>
+
+  <rect class="box" x="330" y="155" width="190" height="95" fill="#a5d8ff" stroke="#4a9eed"/>
+  <text class="label" x="425" y="194" text-anchor="middle">OHLCV data</text>
+  <text class="label" x="425" y="221" text-anchor="middle">yfinance + cache</text>
+
+  <rect class="box" x="590" y="155" width="215" height="95" fill="#d0bfff" stroke="#8b5cf6"/>
+  <text class="label" x="697" y="188" text-anchor="middle">standalone signals</text>
+  <text class="label" x="697" y="216" text-anchor="middle">TEMA / ST / Cone</text>
+
+  <rect class="box" x="875" y="155" width="220" height="95" fill="#fff3bf" stroke="#f59e0b"/>
+  <text class="label" x="985" y="194" text-anchor="middle">multi-timeframe</text>
+  <text class="label" x="985" y="221" text-anchor="middle">weekly filter</text>
+
+  <path class="arrow" d="M 260 202 L 330 202"/>
+  <path class="arrow" d="M 520 202 L 590 202"/>
+  <path class="arrow" d="M 805 202 L 875 202"/>
+
+  <rect class="box" x="210" y="390" width="230" height="105" fill="#eebefa" stroke="#ec4899"/>
+  <text class="label" x="325" y="430" text-anchor="middle">c3</text>
+  <text class="label" x="325" y="459" text-anchor="middle">TEMA D in W + Cone D</text>
+
+  <rect class="box" x="505" y="390" width="230" height="105" fill="#b2f2bb" stroke="#22c55e"/>
+  <text class="label" x="620" y="430" text-anchor="middle">c5</text>
+  <text class="label" x="620" y="459" text-anchor="middle">TEMA W + Cone W</text>
+
+  <rect class="box" x="800" y="390" width="230" height="105" fill="#ffd8a8" stroke="#f59e0b"/>
+  <text class="label" x="915" y="430" text-anchor="middle">c6</text>
+  <text class="label" x="915" y="459" text-anchor="middle">Supertrend + Cone</text>
+
+  <path class="arrow" d="M 985 250 C 820 300, 520 340, 325 390" stroke="#ec4899"/>
+  <text class="small" x="600" y="337" text-anchor="middle">evolved combinations</text>
+  <path class="arrow" d="M 985 250 C 880 315, 720 340, 620 390" stroke="#22c55e"/>
+  <path class="arrow" d="M 985 250 C 960 315, 930 345, 915 390" stroke="#f59e0b"/>
+
+  <rect class="box" x="360" y="620" width="235" height="95" fill="#dbe4ff" stroke="#4a9eed"/>
+  <text class="label" x="477" y="657" text-anchor="middle">backtest suites</text>
+  <text class="label" x="477" y="685" text-anchor="middle">metrics by universe</text>
+
+  <rect class="box" x="660" y="620" width="235" height="95" fill="#d3f9d8" stroke="#22c55e"/>
+  <text class="label" x="777" y="657" text-anchor="middle">portfolio simulation</text>
+  <text class="label" x="777" y="685" text-anchor="middle">capital + ranking rules</text>
+
+  <path class="arrow" d="M 325 495 C 370 545, 430 575, 477 620" stroke="#4a9eed"/>
+  <path class="arrow" d="M 620 495 C 575 545, 520 575, 477 620" stroke="#4a9eed"/>
+  <path class="arrow" d="M 915 495 C 870 545, 815 575, 777 620" stroke="#22c55e"/>
+  <path class="arrow" d="M 595 668 L 660 668"/>
+
+  <rect class="box" x="470" y="775" width="315" height="70" fill="#fff3bf" stroke="#f59e0b"/>
+  <text class="label" x="627" y="805" text-anchor="middle">README, results/, charts</text>
+  <text class="label" x="627" y="832" text-anchor="middle">resume narrative</text>
+
+  <path class="arrow" d="M 477 715 C 500 750, 545 765, 585 775" stroke="#f59e0b"/>
+  <path class="arrow" d="M 777 715 C 755 750, 710 765, 670 775" stroke="#f59e0b"/>
+</svg>

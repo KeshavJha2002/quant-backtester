@@ -1,0 +1,84 @@
+[build-system]
+requires = ["setuptools>=69,<84", "wheel>=0.43"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "trading-bot-research"
+version = "0.1.0"
+description = "Reproducible NSE equity strategy research and backtesting for TEMA-MACD, Supertrend, multi-timeframe, and projection-cone filters."
+readme = "README.md"
+requires-python = ">=3.11,<3.14"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Keshav Jha" },
+]
+keywords = [
+    "backtesting",
+    "quantitative-research",
+    "technical-analysis",
+    "nse",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+]
+dependencies = [
+    "matplotlib>=3.8,<4",
+    "numpy>=1.26,<3",
+    "pandas>=2.2,<3",
+    "tabulate>=0.9,<1",
+    "yfinance>=0.2.54,<1",
+]
+
+[project.optional-dependencies]
+dev = [
+    "build>=1.2,<2",
+    "mypy>=1.11,<2",
+    "pip-audit>=2.7,<3",
+    "pytest>=9.0.3,<10",
+    "pytest-cov>=5,<7",
+    "ruff>=0.9,<1",
+    "twine>=5,<7",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = [
+    "--strict-config",
+    "--strict-markers",
+    "-ra",
+]
+markers = [
+    "network: requires live external market data",
+    "slow: long-running research or backtest test",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+src = ["src", "tests", "scripts", "research"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"**/__init__.py" = ["F401"]
+"scripts/*.py" = ["E402"]
+
+[tool.coverage.run]
+branch = true
+source = ["trading_bot"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true

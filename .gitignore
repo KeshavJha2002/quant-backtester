@@ -1,0 +1,57 @@
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+
+# Environments
+.venv/
+venv/
+env/
+
+# Packaging
+build/
+dist/
+*.egg-info/
+
+# Secrets and environment
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+
+# Editors, operating systems, and local agent state
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+.codex
+.agents/
+
+# Local research inputs and generated reports
+data_cache/
+report/
+reports/
+pine/
+hold.csv
+holdings*.csv
+
+# Temporary and scratch files
+tmp/
+temp/
+scratch/
+*.log
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# Profiling and benchmarks generated locally
+*.prof
+.py-spy/
