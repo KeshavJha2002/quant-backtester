@@ -9,13 +9,11 @@ from trading_bot.tema_macd.strategy import (
     tema_macd_fresh_bull_screen_tight,
 )
 from trading_bot.utility import (
+    UNIVERSES,
     append_shared_report,
     config,
     fetch_data,
     get_fetch_data,
-    nifty50_ns,
-    nifty150_ns,
-    nifty250_ns,
     shared_report_output_path,
 )
 
@@ -24,7 +22,11 @@ def _ticker_cell(values: list[str]) -> str:
     return ", ".join(f"`{value}`" for value in values) if values else "-"
 
 
-def build_tema_macd_report(tight: bool = True, fetch_data_func=fetch_data) -> str:
+def build_tema_macd_report(
+    tight: bool = True,
+    fetch_data_func=fetch_data,
+    universes: list[tuple[str, list[str]]] | None = None,
+) -> str:
     scanner = tema_macd_fresh_bull_screen_tight if tight else tema_macd_fresh_bull_screen
     as_of = datetime.now().isoformat(timespec="seconds")
     sections = [
@@ -34,18 +36,12 @@ def build_tema_macd_report(tight: bool = True, fetch_data_func=fetch_data) -> st
         "",
     ]
 
-    n50_d = scanner(nifty50_ns, fetch_data_func, "D", config)
-    n150_d = scanner(nifty150_ns, fetch_data_func, "D", config)
-    n250_d = scanner(nifty250_ns, fetch_data_func, "D", config)
-    n50_w = scanner(nifty50_ns, fetch_data_func, "W", config)
-    n150_w = scanner(nifty150_ns, fetch_data_func, "W", config)
-    n250_w = scanner(nifty250_ns, fetch_data_func, "W", config)
-
-    rows = [
-        ("N50", n50_d, n50_w),
-        ("N150", n150_d, n150_w),
-        ("N250", n250_d, n250_w),
-    ]
+    target_universes = universes if universes is not None else UNIVERSES
+    rows = []
+    for segment, tickers in target_universes:
+        daily = scanner(tickers, fetch_data_func, "D", config)
+        weekly = scanner(tickers, fetch_data_func, "W", config)
+        rows.append((segment, daily, weekly))
 
     sections.extend(
         [
@@ -78,9 +74,12 @@ def run_tema_macd_report(
     report_path: Path | None = None,
     *,
     refresh_data: bool = False,
+    universes: list[tuple[str, list[str]]] | None = None,
 ) -> str:
     report = build_tema_macd_report(
-        tight=tight, fetch_data_func=get_fetch_data(refresh=refresh_data)
+        tight=tight,
+        fetch_data_func=get_fetch_data(refresh=refresh_data),
+        universes=universes,
     )
     if report_path is None:
         report_path = shared_report_output_path(datetime.now().strftime("%Y-%m-%d"))

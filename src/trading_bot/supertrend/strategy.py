@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 import numpy as np
 import pandas as pd
 
-from trading_bot.tema_macd.strategy import _latest_complete_bar_index
-from trading_bot.utility import compute_st_trend_from_config
+from trading_bot.utility import (
+    compute_st_trend_from_config,
+    compute_triple_supertrend,
+    latest_complete_bar_index,
+)
 
 
 def supertrend_or_regime_filter(
@@ -18,15 +21,15 @@ def supertrend_or_regime_filter(
     recent_5: dict[str, list[str]],
     recent_2: dict[str, list[str]],
 ) -> None:
+    """Filter for OR-regime Supertrend bullish state and recent bullish transitions."""
     close = np.asarray(data["close"].values, float).ravel()
     high = np.asarray(data["high"].values, float).ravel()
     low = np.asarray(data["low"].values, float).ravel()
 
-    trend1 = compute_st_trend_from_config(close, high, low, 10, 3.0, 1)
-    trend2 = compute_st_trend_from_config(close, high, low, 14, 3.0, 2)
-    trend3 = compute_st_trend_from_config(close, high, low, 14, 3.5, 3)
-
+    trend1, trend2, trend3 = compute_triple_supertrend(close, high, low)
     n = len(close)
+    if n == 0:
+        return
 
     if trend1[-1] == 1 or trend2[-1] == 1 or trend3[-1] == 1:
         bull_trend_tickers[freq].append(ticker)
@@ -50,6 +53,7 @@ def supertrend_regime_pullback_filter(
     recent_5: dict[str, list[str]],
     recent_2: dict[str, list[str]],
 ) -> None:
+    """Filter for pullback Supertrend entries (fast trend flip while slow trend remains bullish)."""
     close = np.asarray(data["close"].values, float).ravel()
     high = np.asarray(data["high"].values, float).ravel()
     low = np.asarray(data["low"].values, float).ravel()
@@ -58,6 +62,8 @@ def supertrend_regime_pullback_filter(
     trend_slow = compute_st_trend_from_config(close, high, low, 14, 3.5, 3)
 
     n = len(close)
+    if n == 0:
+        return
 
     if trend_slow[-1] == 1:
         bull_trend_tickers[freq].append(ticker)
@@ -71,10 +77,11 @@ def supertrend_regime_pullback_filter(
 
 def supertrend_regime_exit_filter(
     bought_tickers: Iterable[str],
-    fetch_data_func,
+    fetch_data_func: Callable[..., pd.DataFrame],
     freq: str,
     grace_lb: int = 2,
 ) -> dict[str, str]:
+    """Evaluate exit condition for active positions under Supertrend regime rules."""
     decision: dict[str, str] = {}
 
     for ticker in bought_tickers:
@@ -89,6 +96,9 @@ def supertrend_regime_exit_filter(
             trend_slow = compute_st_trend_from_config(close, high, low, 14, 3.5, 3)
 
             n = len(close)
+            if n == 0:
+                decision[ticker] = "hold"
+                continue
 
             if trend_slow[-1] == -1:
                 decision[ticker] = "sell"
@@ -115,17 +125,18 @@ def supertrend_regime_exit_filter(
 
 def run_supertrend_scans(
     tickers: Iterable[str],
-    fetch_data_func,
+    fetch_data_func: Callable[..., pd.DataFrame],
     freq: str,
     mode: str,
 ) -> tuple[dict[str, list[str]], dict[str, list[str]], dict[str, list[str]]]:
+    """Run batch Supertrend scans across a ticker list on specified frequency and mode."""
     bull = defaultdict(list)
     recent_5 = defaultdict(list)
     recent_2 = defaultdict(list)
 
     for ticker in tickers:
         data = fetch_data_func(ticker, type=freq)
-        complete_idx = _latest_complete_bar_index(np.asarray(data["time"].values), freq)
+        complete_idx = latest_complete_bar_index(np.asarray(data["time"].values), freq)
         if complete_idx is None or complete_idx <= 0:
             continue
         data = data.iloc[: complete_idx + 1].reset_index(drop=True)

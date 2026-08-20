@@ -5,23 +5,18 @@ from trading_bot.strategy.common import (
     UNIVERSES,
     StrategyContext,
     build_strategy_section,
+    get_complete_bar_fetcher,
     get_fetcher,
     write_section_report,
 )
-from trading_bot.tema_macd.strategy import _latest_complete_bar_index, tema_macd_fresh_bull_screen
+from trading_bot.tema_macd.strategy import tema_macd_fresh_bull_screen
 from trading_bot.utility import config
 
 
 def build_section(context: StrategyContext):
     fetcher = get_fetcher(context.refresh_data)
+    complete_weekly_fetcher = get_complete_bar_fetcher(fetcher)
     cone_config = ProjectionConeConfig(lock_mode=True, lock_to_bull=False)
-
-    def complete_weekly_fetcher(ticker: str, *, type: str):
-        data = fetcher(ticker, type=type)
-        complete_idx = _latest_complete_bar_index(data["time"].values, type)
-        if complete_idx is None or complete_idx <= 0:
-            raise ValueError(f"No complete {type} bar available for {ticker}")
-        return data.iloc[: complete_idx + 1].reset_index(drop=True)
 
     rows = []
     for segment, tickers in UNIVERSES:

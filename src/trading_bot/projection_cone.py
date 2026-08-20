@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -24,20 +25,32 @@ class ProjectionConeConfig:
     lock_to_bull: bool = False
 
 
-def _resolve_bars_per_year(freq: str, bars_per_year: int | None) -> int:
+def resolve_bars_per_year(freq: str, bars_per_year: int | None) -> int:
+    """Resolve the number of trading bars per year for a given timeframe frequency."""
     if bars_per_year is not None:
         return bars_per_year
     return 252 if freq == "D" else 52
 
 
-def _annual_volatility(close: np.ndarray, vol_length: int, bars_per_year: int) -> np.ndarray:
-    log_return = np.full(len(close), np.nan, dtype=float)
-    log_return[1:] = np.log(close[1:] / close[:-1])
+def calculate_annual_volatility(
+    close: np.ndarray, vol_length: int, bars_per_year: int
+) -> np.ndarray:
+    """Calculate rolling annualized log-return volatility."""
+    close = np.asarray(close, dtype=float).ravel()
+    n = len(close)
+    if n < 2:
+        return np.full(n, np.nan, dtype=float)
+
+    log_return = np.full(n, np.nan, dtype=float)
+    with np.errstate(divide="ignore", invalid="ignore"):
+        log_return[1:] = np.log(close[1:] / close[:-1])
+
     raw_vol = pd.Series(log_return).rolling(vol_length).std(ddof=0).to_numpy()
     return raw_vol * np.sqrt(bars_per_year)
 
 
-def _percent_rank_current(values: np.ndarray, lookback: int) -> float:
+def calculate_percent_rank(values: np.ndarray, lookback: int) -> float:
+    """Calculate percentile rank of the latest valid value within the lookback window."""
     valid = values[~np.isnan(values)]
     if len(valid) == 0:
         return float("nan")
@@ -46,9 +59,10 @@ def _percent_rank_current(values: np.ndarray, lookback: int) -> float:
     return float(np.sum(window <= current) / len(window) * 100.0)
 
 
-def _find_last_pivot(
+def find_last_pivot(
     high: np.ndarray, low: np.ndarray, pivot_len: int, lock_to_bull: bool
 ) -> int | None:
+    """Find the most recent swing pivot high or pivot low index."""
     source = low if lock_to_bull else high
     comparator = np.min if lock_to_bull else np.max
     pivot_index: int | None = None
@@ -64,7 +78,7 @@ def _find_last_pivot(
     return pivot_index
 
 
-def _cone_price(
+def calculate_cone_price(
     base_price: float,
     vol: float,
     bars_forward: int,
@@ -72,11 +86,28 @@ def _cone_price(
     direction: int,
     bars_per_year: int,
 ) -> float:
+    """Calculate boundary price at forward horizon for given sigma multiplier and direction (+1/-1)."""
     drift = direction * sigma_multiplier * vol * np.sqrt(float(bars_forward) / float(bars_per_year))
     return float(base_price * np.exp(drift))
 
 
-def _zone_from_sigma(sigma_move: float) -> tuple[str, str]:
+def calculate_sigma_move(
+    current_price: float,
+    anchor_price: float,
+    current_vol: float,
+    bars_since_anchor: int,
+    bars_per_year: int,
+) -> float:
+    """Calculate the normalized standard deviation (sigma) move from anchor to current price."""
+    t_now = max(bars_since_anchor, 1)
+    return float(
+        np.log(current_price / anchor_price)
+        / (current_vol * np.sqrt(float(t_now) / float(bars_per_year)))
+    )
+
+
+def get_zone_from_sigma(sigma_move: float) -> tuple[str, str]:
+    """Map sigma move to zone label and color."""
     sigma_abs = abs(sigma_move)
     if sigma_abs <= 1.0:
         return "Inside 1σ", C_TEAL
@@ -87,7 +118,8 @@ def _zone_from_sigma(sigma_move: float) -> tuple[str, str]:
     return "Beyond 3σ", C_RED
 
 
-def _vol_regime_from_percentile(vol_percentile: float) -> tuple[str, str]:
+def get_vol_regime_from_percentile(vol_percentile: float) -> tuple[str, str]:
+    """Map volatility percentile to regime label and color."""
     if vol_percentile >= 60:
         return "HIGH", C_AMBER
     if vol_percentile >= 30:
@@ -95,14 +127,133 @@ def _vol_regime_from_percentile(vol_percentile: float) -> tuple[str, str]:
     return "LOW", C_TEAL
 
 
+def get_sigma_bucket(sigma_move: float, *, unicode_symbol: bool = True) -> str:
+    """Categorize sigma move into standard discrete bucket interval."""
+    sym = "σ" if unicode_symbol else "sigma"
+    if sigma_move < -3.0:
+        return f"< -3{sym}"
+    if sigma_move < -2.0:
+        return f"-3{sym} to -2{sym}"
+    if sigma_move < -1.0:
+        return f"-2{sym} to -1{sym}"
+    if sigma_move < 0.0:
+        return f"-1{sym} to 0{sym}"
+    if sigma_move < 1.0:
+        return f"0{sym} to +1{sym}"
+    if sigma_move < 2.0:
+        return f"+1{sym} to +2{sym}"
+    if sigma_move < 3.0:
+        return f"+2{sym} to +3{sym}"
+    return f"> +3{sym}"
+
+
+def compute_series_entry_sigmas(
+    close: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    freq: str = "D",
+    cone_config: ProjectionConeConfig | None = None,
+) -> np.ndarray:
+    """Precompute entry sigma moves for all bars in a series at high performance."""
+    cone_config = cone_config or ProjectionConeConfig()
+    n = len(close)
+    sigmas = np.full(n, np.nan)
+    pivot_len = cone_config.pivot_len
+    lock_to_bull = cone_config.lock_to_bull
+
+    if n < max(cone_config.vol_length + 1, (2 * pivot_len) + 1):
+        return sigmas
+
+    bars_per_year = resolve_bars_per_year(freq, cone_config.bars_per_year)
+    annual_vol = calculate_annual_volatility(close, cone_config.vol_length, bars_per_year)
+
+    last_pivot_idx: int | None = None
+    last_pivot_price: float | None = None
+
+    for i in range(2 * pivot_len, n):
+        p_cand = i - pivot_len
+        if lock_to_bull:
+            window_low = low[p_cand - pivot_len : p_cand + pivot_len + 1]
+            if len(window_low) == 2 * pivot_len + 1 and low[p_cand] == np.min(window_low):
+                last_pivot_idx = p_cand
+                last_pivot_price = float(low[p_cand])
+        else:
+            window_high = high[p_cand - pivot_len : p_cand + pivot_len + 1]
+            if len(window_high) == 2 * pivot_len + 1 and high[p_cand] == np.max(window_high):
+                last_pivot_idx = p_cand
+                last_pivot_price = float(high[p_cand])
+
+        current_vol = float(annual_vol[i])
+        if np.isnan(current_vol) or current_vol <= 0:
+            continue
+
+        if cone_config.lock_mode and last_pivot_idx is not None:
+            anchor_idx = last_pivot_idx
+            anchor_price = last_pivot_price
+        else:
+            anchor_idx = i
+            anchor_price = float(close[i])
+
+        bars_since_anchor = max(i - anchor_idx, 1)
+        sigmas[i] = calculate_sigma_move(
+            current_price=float(close[i]),
+            anchor_price=anchor_price,
+            current_vol=current_vol,
+            bars_since_anchor=bars_since_anchor,
+            bars_per_year=bars_per_year,
+        )
+
+    return sigmas
+
+
+def calculate_entry_sigma(
+    close: np.ndarray,
+    high: np.ndarray,
+    low: np.ndarray,
+    idx: int,
+    freq: str,
+    cone_config: ProjectionConeConfig,
+) -> float | None:
+    """Calculate the entry sigma move for a bar at index idx."""
+    bars_per_year = resolve_bars_per_year(freq, cone_config.bars_per_year)
+    annual_vol = calculate_annual_volatility(close[: idx + 1], cone_config.vol_length, bars_per_year)
+    current_vol = float(annual_vol[-1])
+    if np.isnan(current_vol) or current_vol <= 0:
+        return None
+
+    anchor_idx = idx
+    anchor_price = float(close[idx])
+
+    if cone_config.lock_mode:
+        pivot_idx = find_last_pivot(
+            high[: idx + 1],
+            low[: idx + 1],
+            cone_config.pivot_len,
+            cone_config.lock_to_bull,
+        )
+        if pivot_idx is not None and not np.isnan(annual_vol[pivot_idx]):
+            anchor_idx = pivot_idx
+            anchor_price = float(low[pivot_idx] if cone_config.lock_to_bull else high[pivot_idx])
+
+    bars_since_anchor = max(idx - anchor_idx, 1)
+    return calculate_sigma_move(
+        current_price=float(close[idx]),
+        anchor_price=anchor_price,
+        current_vol=current_vol,
+        bars_since_anchor=bars_since_anchor,
+        bars_per_year=bars_per_year,
+    )
+
+
 def analyze_projection_cone(
     ticker: str,
-    fetch_data_func=fetch_data,
+    fetch_data_func: Callable[..., pd.DataFrame] = fetch_data,
     freq: str = "D",
     config: ProjectionConeConfig | None = None,
 ) -> dict[str, Any]:
+    """Perform full projection-cone volatility, anchor, boundary and regime analysis on a ticker."""
     config = config or ProjectionConeConfig()
-    bars_per_year = _resolve_bars_per_year(freq, config.bars_per_year)
+    bars_per_year = resolve_bars_per_year(freq, config.bars_per_year)
 
     data = fetch_data_func(ticker, type=freq).reset_index(drop=True)
     close = np.asarray(data["close"].values, dtype=float).ravel()
@@ -115,7 +266,7 @@ def analyze_projection_cone(
             f"Not enough data for {ticker}. Need at least {min_bars} bars, got {len(close)}."
         )
 
-    annual_vol = _annual_volatility(close, config.vol_length, bars_per_year)
+    annual_vol = calculate_annual_volatility(close, config.vol_length, bars_per_year)
     last_idx = len(close) - 1
     current_price = float(close[last_idx])
     current_vol = float(annual_vol[last_idx])
@@ -129,7 +280,7 @@ def analyze_projection_cone(
     anchor_vol = current_vol
 
     if config.lock_mode:
-        pivot_idx = _find_last_pivot(high, low, config.pivot_len, config.lock_to_bull)
+        pivot_idx = find_last_pivot(high, low, config.pivot_len, config.lock_to_bull)
         if pivot_idx is not None and not np.isnan(annual_vol[pivot_idx]):
             anchor_idx = pivot_idx
             anchor_type = "pivot_low" if config.lock_to_bull else "pivot_high"
@@ -137,44 +288,47 @@ def analyze_projection_cone(
             anchor_vol = float(annual_vol[pivot_idx])
 
     t_now = max(last_idx - anchor_idx, 1)
-    sigma_move = float(
-        np.log(current_price / anchor_price)
-        / (current_vol * np.sqrt(float(t_now) / float(bars_per_year)))
+    sigma_move = calculate_sigma_move(
+        current_price=current_price,
+        anchor_price=anchor_price,
+        current_vol=current_vol,
+        bars_since_anchor=t_now,
+        bars_per_year=bars_per_year,
     )
 
-    vol_percentile = _percent_rank_current(annual_vol, 252)
-    vol_regime, vol_regime_color = _vol_regime_from_percentile(vol_percentile)
-    price_zone, price_zone_color = _zone_from_sigma(sigma_move)
+    vol_percentile = calculate_percent_rank(annual_vol, 252)
+    vol_regime, vol_regime_color = get_vol_regime_from_percentile(vol_percentile)
+    price_zone, price_zone_color = get_zone_from_sigma(sigma_move)
 
-    upper_25 = _cone_price(anchor_price, anchor_vol, t_now, 2.5, 1, bars_per_year)
-    lower_25 = _cone_price(anchor_price, anchor_vol, t_now, 2.5, -1, bars_per_year)
+    upper_25 = calculate_cone_price(anchor_price, anchor_vol, t_now, 2.5, 1, bars_per_year)
+    lower_25 = calculate_cone_price(anchor_price, anchor_vol, t_now, 2.5, -1, bars_per_year)
 
     current_boundaries = {
-        "1sigma_upper": _cone_price(anchor_price, anchor_vol, t_now, 1.0, 1, bars_per_year),
-        "1sigma_lower": _cone_price(anchor_price, anchor_vol, t_now, 1.0, -1, bars_per_year),
-        "2sigma_upper": _cone_price(anchor_price, anchor_vol, t_now, 2.0, 1, bars_per_year),
-        "2sigma_lower": _cone_price(anchor_price, anchor_vol, t_now, 2.0, -1, bars_per_year),
-        "3sigma_upper": _cone_price(anchor_price, anchor_vol, t_now, 3.0, 1, bars_per_year),
-        "3sigma_lower": _cone_price(anchor_price, anchor_vol, t_now, 3.0, -1, bars_per_year),
+        "1sigma_upper": calculate_cone_price(anchor_price, anchor_vol, t_now, 1.0, 1, bars_per_year),
+        "1sigma_lower": calculate_cone_price(anchor_price, anchor_vol, t_now, 1.0, -1, bars_per_year),
+        "2sigma_upper": calculate_cone_price(anchor_price, anchor_vol, t_now, 2.0, 1, bars_per_year),
+        "2sigma_lower": calculate_cone_price(anchor_price, anchor_vol, t_now, 2.0, -1, bars_per_year),
+        "3sigma_upper": calculate_cone_price(anchor_price, anchor_vol, t_now, 3.0, 1, bars_per_year),
+        "3sigma_lower": calculate_cone_price(anchor_price, anchor_vol, t_now, 3.0, -1, bars_per_year),
     }
 
     projected_boundaries = {
-        "1sigma_upper": _cone_price(
+        "1sigma_upper": calculate_cone_price(
             anchor_price, anchor_vol, config.proj_bars, 1.0, 1, bars_per_year
         ),
-        "1sigma_lower": _cone_price(
+        "1sigma_lower": calculate_cone_price(
             anchor_price, anchor_vol, config.proj_bars, 1.0, -1, bars_per_year
         ),
-        "2sigma_upper": _cone_price(
+        "2sigma_upper": calculate_cone_price(
             anchor_price, anchor_vol, config.proj_bars, 2.0, 1, bars_per_year
         ),
-        "2sigma_lower": _cone_price(
+        "2sigma_lower": calculate_cone_price(
             anchor_price, anchor_vol, config.proj_bars, 2.0, -1, bars_per_year
         ),
-        "3sigma_upper": _cone_price(
+        "3sigma_upper": calculate_cone_price(
             anchor_price, anchor_vol, config.proj_bars, 3.0, 1, bars_per_year
         ),
-        "3sigma_lower": _cone_price(
+        "3sigma_lower": calculate_cone_price(
             anchor_price, anchor_vol, config.proj_bars, 3.0, -1, bars_per_year
         ),
     }
@@ -256,6 +410,7 @@ def analyze_projection_cone(
 
 
 def format_projection_cone_report(result: dict[str, Any]) -> str:
+    """Format projection cone analysis output as readable markdown report."""
     zone = result["zone"]
     vol = result["volatility"]
     anchor = result["anchor"]
@@ -279,6 +434,16 @@ def format_projection_cone_report(result: dict[str, Any]) -> str:
             f"{projection['bars_forward']}-bar 3σ: {bounds['3sigma_lower']:.2f} to {bounds['3sigma_upper']:.2f} | +/-{projection['expected_move_pct']['3sigma']:.2f}%",
         ]
     )
+
+
+# Backward-compatible aliases
+_resolve_bars_per_year = resolve_bars_per_year
+_annual_volatility = calculate_annual_volatility
+_percent_rank_current = calculate_percent_rank
+_find_last_pivot = find_last_pivot
+_cone_price = calculate_cone_price
+_zone_from_sigma = get_zone_from_sigma
+_vol_regime_from_percentile = get_vol_regime_from_percentile
 
 
 if __name__ == "__main__":

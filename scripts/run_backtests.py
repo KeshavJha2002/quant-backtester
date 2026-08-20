@@ -22,6 +22,7 @@ TEST_REGISTRY = {
         4: "research.backtests.combination.test_c4_trend_supertrend_d_in_w_projection_cone_d",
         5: "research.backtests.combination.test_c5_tema_macd_w_projection_cone_w",
         6: "research.backtests.combination.test_c6_trend_supertrend_w_projection_cone_w",
+        7: "research.backtests.combination.test_c7_quantum_supertrend_mtf_projection_cone_d",
     },
 }
 

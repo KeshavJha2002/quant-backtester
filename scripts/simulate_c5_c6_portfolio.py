@@ -89,7 +89,7 @@ class TradeCandidate:
 
     @property
     def duration_days(self) -> float:
-        return float((self.exit_time - self.entry_time) / pd.Timedelta(days=1))
+        return float((pd.to_datetime(self.exit_time) - pd.to_datetime(self.entry_time)).total_seconds() / 86400.0)
 
 
 @dataclass

@@ -1,0 +1,127 @@
+{
+  "total_budget": 596259.6,
+  "cash_balance": 164015.98,
+  "positions": {
+    "MOREPENLAB.NS": {
+      "ticker": "MOREPENLAB.NS",
+      "quantity": 256,
+      "avg_buy_price": 54.59,
+      "buy_date": "2026-08-20",
+      "initial_stop_loss": 0.0,
+      "current_stop_loss": 0.0,
+      "target_price": 0.0,
+      "notes": "Morepen Laboratories Ltd",
+      "pyramid_count": 0
+    },
+    "GLAXO.NS": {
+      "ticker": "GLAXO.NS",
+      "quantity": 12,
+      "avg_buy_price": 2499.05,
+      "buy_date": "2026-08-20",
+      "initial_stop_loss": 0.0,
+      "current_stop_loss": 0.0,
+      "target_price": 0.0,
+      "notes": "GlaxoSmithKline Pharmaceuticals Ltd",
+      "pyramid_count": 0
+    },
+    "HDFCSML250.NS": {
+      "ticker": "HDFCSML250.NS",
+      "quantity": 572,
+      "avg_buy_price": 164.16,
+      "buy_date": "2026-08-20",
+      "initial_stop_loss": 0.0,
+      "current_stop_loss": 0.0,
+      "target_price": 0.0,
+      "notes": "HDFC Nifty Smallcap 250 ETF",
+      "pyramid_count": 0
+    },
+    "MAHSCOOTER.NS": {
+      "ticker": "MAHSCOOTER.NS",
+      "quantity": 4,
+      "avg_buy_price": 12245.25,
+      "buy_date": "2026-08-20",
+      "initial_stop_loss": 0.0,
+      "current_stop_loss": 0.0,
+      "target_price": 0.0,
+      "notes": "Maharashtra Scooters Ltd",
+      "pyramid_count": 0
+    },
+    "AIIL.NS": {
+      "ticker": "AIIL.NS",
+      "quantity": 73,
+      "avg_buy_price": 506.07,
+      "buy_date": "2026-08-20",
+      "initial_stop_loss": 0.0,
+      "current_stop_loss": 0.0,
+      "target_price": 0.0,
+      "notes": "Authum Investment & Infrastructure Ltd",
+      "pyramid_count": 0
+    },
+    "CIPLA.NS": {
+      "ticker": "CIPLA.NS",
+      "quantity": 5,
+      "avg_buy_price": 1427.35,
+      "buy_date": "2026-08-20",
+      "initial_stop_loss": 0.0,
+      "current_stop_loss": 0.0,
+      "target_price": 0.0,
+      "notes": "Cipla Ltd",
+      "pyramid_count": 0
+    },
+    "BHARTIARTL.NS": {
+      "ticker": "BHARTIARTL.NS",
+      "quantity": 10,
+      "avg_buy_price": 1953.5,
+      "buy_date": "2026-08-20",
+      "initial_stop_loss": 0.0,
+      "current_stop_loss": 0.0,
+      "target_price": 0.0,
+      "notes": "Bharti Airtel Ltd",
+      "pyramid_count": 0
+    },
+    "MCX.NS": {
+      "ticker": "MCX.NS",
+      "quantity": 15,
+      "avg_buy_price": 3162.72,
+      "buy_date": "2026-08-20",
+      "initial_stop_loss": 0.0,
+      "current_stop_loss": 0.0,
+      "target_price": 0.0,
+      "notes": "Multi Commodity Exchange of India Ltd",
+      "pyramid_count": 0
+    },
+    "ABBOTINDIA.NS": {
+      "ticker": "ABBOTINDIA.NS",
+      "quantity": 1,
+      "avg_buy_price": 27540.0,
+      "buy_date": "2026-08-20",
+      "initial_stop_loss": 0.0,
+      "current_stop_loss": 0.0,
+      "target_price": 0.0,
+      "notes": "Abbott India Ltd",
+      "pyramid_count": 0
+    },
+    "RALLIS.NS": {
+      "ticker": "RALLIS.NS",
+      "quantity": 150,
+      "avg_buy_price": 268.3,
+      "buy_date": "2026-08-20",
+      "initial_stop_loss": 0.0,
+      "current_stop_loss": 0.0,
+      "target_price": 0.0,
+      "notes": "Rallis India Ltd",
+      "pyramid_count": 0
+    },
+    "ETERNAL.NS": {
+      "ticker": "ETERNAL.NS",
+      "quantity": 130,
+      "avg_buy_price": 252.08,
+      "buy_date": "2026-08-20",
+      "initial_stop_loss": 0.0,
+      "current_stop_loss": 0.0,
+      "target_price": 0.0,
+      "notes": "Eternal Ltd",
+      "pyramid_count": 0
+    }
+  }
+}

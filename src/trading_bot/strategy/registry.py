@@ -9,12 +9,14 @@ from trading_bot.strategy.combination import (
     build_c4,
     build_c5,
     build_c6,
+    build_c7,
     run_c1,
     run_c2,
     run_c3,
     run_c4,
     run_c5,
     run_c6,
+    run_c7,
 )
 from trading_bot.strategy.common import (
     StrategyContext,
@@ -37,6 +39,7 @@ COMBINATION_REGISTRY = {
     4: run_c4,
     5: run_c5,
     6: run_c6,
+    7: run_c7,
 }
 
 STANDALONE_BUILDERS = {
@@ -52,6 +55,7 @@ COMBINATION_BUILDERS = {
     4: build_c4,
     5: build_c5,
     6: build_c6,
+    7: build_c7,
 }
 
 

@@ -15,9 +15,8 @@ import pandas as pd
 
 from trading_bot.projection_cone import (
     ProjectionConeConfig,
-    _annual_volatility,
-    _find_last_pivot,
-    _resolve_bars_per_year,
+    calculate_entry_sigma,
+    get_sigma_bucket,
 )
 from trading_bot.utility import (
     config,
@@ -43,57 +42,6 @@ class TradeRecord:
     duration_days: float
     sigma_move: float
     sigma_bucket: str
-
-
-def _sigma_bucket(sigma_move: float) -> str:
-    if sigma_move < -3.0:
-        return "< -3σ"
-    if sigma_move < -2.0:
-        return "-3σ to -2σ"
-    if sigma_move < -1.0:
-        return "-2σ to -1σ"
-    if sigma_move < 0.0:
-        return "-1σ to 0σ"
-    if sigma_move < 1.0:
-        return "0σ to +1σ"
-    if sigma_move < 2.0:
-        return "+1σ to +2σ"
-    if sigma_move < 3.0:
-        return "+2σ to +3σ"
-    return "> +3σ"
-
-
-def _entry_sigma_move(
-    close: np.ndarray,
-    high: np.ndarray,
-    low: np.ndarray,
-    idx: int,
-    freq: str,
-    cone_config: ProjectionConeConfig,
-) -> float | None:
-    bars_per_year = _resolve_bars_per_year(freq, cone_config.bars_per_year)
-    annual_vol = _annual_volatility(close[: idx + 1], cone_config.vol_length, bars_per_year)
-    current_vol = float(annual_vol[-1])
-    if np.isnan(current_vol) or current_vol <= 0:
-        return None
-
-    anchor_idx = idx
-    anchor_price = float(close[idx])
-
-    if cone_config.lock_mode:
-        pivot_idx = _find_last_pivot(
-            high[: idx + 1], low[: idx + 1], cone_config.pivot_len, cone_config.lock_to_bull
-        )
-        if pivot_idx is not None and not np.isnan(annual_vol[pivot_idx]):
-            anchor_idx = pivot_idx
-            anchor_price = float(low[pivot_idx] if cone_config.lock_to_bull else high[pivot_idx])
-
-    t_now = max(idx - anchor_idx, 1)
-    sigma_move = float(
-        np.log(float(close[idx]) / anchor_price)
-        / (current_vol * np.sqrt(float(t_now) / float(bars_per_year)))
-    )
-    return sigma_move
 
 
 def backtest_tema_macd_with_cone(
@@ -135,7 +83,7 @@ def backtest_tema_macd_with_cone(
 
         if buy_cond:
             last_tran = True
-            sigma_move = _entry_sigma_move(close, high, low, i, freq, cone_config)
+            sigma_move = calculate_entry_sigma(close, high, low, i, freq, cone_config)
             if sigma_move is None:
                 continue
             if not in_position:
@@ -143,13 +91,13 @@ def backtest_tema_macd_with_cone(
                 entry_price = float(close[i])
                 entry_time = time_values[i]
                 entry_sigma = sigma_move
-                entry_bucket = _sigma_bucket(sigma_move)
+                entry_bucket = get_sigma_bucket(sigma_move, unicode_symbol=True)
 
         elif sell_cond:
             last_tran = False
             if in_position and entry_time is not None:
                 exit_price = float(close[i])
-                duration = pd.Timestamp(time_values[i]) - pd.Timestamp(entry_time)
+                duration_seconds = (pd.to_datetime(time_values[i]) - pd.to_datetime(entry_time)).total_seconds()
                 trades.append(
                     TradeRecord(
                         ticker=ticker,
@@ -160,7 +108,7 @@ def backtest_tema_macd_with_cone(
                         entry_price=entry_price,
                         exit_price=exit_price,
                         return_pct=(exit_price / entry_price - 1.0) * 100.0,
-                        duration_days=float(duration / pd.Timedelta(days=1)),
+                        duration_days=float(duration_seconds / 86400.0),
                         sigma_move=entry_sigma,
                         sigma_bucket=entry_bucket,
                     )

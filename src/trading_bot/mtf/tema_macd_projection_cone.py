@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any
 
@@ -9,15 +10,18 @@ import pandas as pd
 
 from trading_bot.projection_cone import (
     ProjectionConeConfig,
-    _annual_volatility,
-    _find_last_pivot,
-    _resolve_bars_per_year,
+    calculate_annual_volatility,
+    calculate_sigma_move,
+    find_last_pivot,
+    get_sigma_bucket,
+    resolve_bars_per_year,
 )
-from trading_bot.tema_macd.strategy import _latest_complete_bar_index, _tema_macd_state
+from trading_bot.tema_macd.strategy import compute_tema_macd_state
 from trading_bot.utility import (
     config,
     ensure_output_dir,
     get_fetch_data,
+    latest_complete_bar_index,
     nifty50_ns,
     nifty150_ns,
     nifty250_ns,
@@ -39,24 +43,6 @@ class TemaMacdProjectionConeMatch:
     daily_signal: str = "fresh_buy"
 
 
-def _sigma_bucket(sigma_move: float) -> str:
-    if sigma_move < -3.0:
-        return "< -3σ"
-    if sigma_move < -2.0:
-        return "-3σ to -2σ"
-    if sigma_move < -1.0:
-        return "-2σ to -1σ"
-    if sigma_move < 0.0:
-        return "-1σ to 0σ"
-    if sigma_move < 1.0:
-        return "0σ to +1σ"
-    if sigma_move < 2.0:
-        return "+1σ to +2σ"
-    if sigma_move < 3.0:
-        return "+2σ to +3σ"
-    return "> +3σ"
-
-
 def _daily_sigma_snapshot(
     data: pd.DataFrame,
     idx: int,
@@ -66,8 +52,8 @@ def _daily_sigma_snapshot(
     high = np.asarray(data["high"].values, dtype=float).ravel()
     low = np.asarray(data["low"].values, dtype=float).ravel()
 
-    bars_per_year = _resolve_bars_per_year("D", cone_config.bars_per_year)
-    annual_vol = _annual_volatility(close[: idx + 1], cone_config.vol_length, bars_per_year)
+    bars_per_year = resolve_bars_per_year("D", cone_config.bars_per_year)
+    annual_vol = calculate_annual_volatility(close[: idx + 1], cone_config.vol_length, bars_per_year)
     current_vol = float(annual_vol[-1])
     if np.isnan(current_vol) or current_vol <= 0:
         return None
@@ -77,7 +63,7 @@ def _daily_sigma_snapshot(
     anchor_price = float(close[idx])
 
     if cone_config.lock_mode:
-        pivot_idx = _find_last_pivot(
+        pivot_idx = find_last_pivot(
             high[: idx + 1],
             low[: idx + 1],
             cone_config.pivot_len,
@@ -89,14 +75,17 @@ def _daily_sigma_snapshot(
             anchor_price = float(low[pivot_idx] if cone_config.lock_to_bull else high[pivot_idx])
 
     t_now = max(idx - anchor_idx, 1)
-    sigma_move = float(
-        np.log(float(close[idx]) / anchor_price)
-        / (current_vol * np.sqrt(float(t_now) / float(bars_per_year)))
+    sigma_move = calculate_sigma_move(
+        current_price=float(close[idx]),
+        anchor_price=anchor_price,
+        current_vol=current_vol,
+        bars_since_anchor=t_now,
+        bars_per_year=bars_per_year,
     )
 
     return {
         "sigma_move": sigma_move,
-        "sigma_bucket": _sigma_bucket(sigma_move),
+        "sigma_bucket": get_sigma_bucket(sigma_move, unicode_symbol=True),
         "anchor_price": anchor_price,
         "anchor_type": anchor_type,
     }
@@ -104,13 +93,14 @@ def _daily_sigma_snapshot(
 
 def scan_tema_macd_projection_cone(
     tickers: list[str],
-    fetch_data_func,
+    fetch_data_func: Callable[..., pd.DataFrame],
     *,
     segment: str,
     tema_config: dict[str, int],
     cone_config: ProjectionConeConfig | None = None,
     min_negative_sigma: float = -1.0,
 ) -> list[TemaMacdProjectionConeMatch]:
+    """Scan tickers for daily fresh TEMA-MACD buy confirmed by weekly bull and negative cone sigma."""
     cone_config = cone_config or ProjectionConeConfig(lock_mode=True, lock_to_bull=False)
     matches: list[TemaMacdProjectionConeMatch] = []
 
@@ -129,15 +119,15 @@ def scan_tema_macd_projection_cone(
             if len(weekly_close) < max(tema_config["tema_len"], tema_config["macd_slow"]) + 5:
                 continue
 
-            daily_idx = _latest_complete_bar_index(daily_time_values, "D")
-            weekly_idx = _latest_complete_bar_index(weekly_time_values, "W")
+            daily_idx = latest_complete_bar_index(daily_time_values, "D")
+            weekly_idx = latest_complete_bar_index(weekly_time_values, "W")
             if daily_idx is None or daily_idx <= 0 or weekly_idx is None or weekly_idx <= 0:
                 continue
 
-            daily_tema, daily_macd, daily_signal, daily_state_before, _ = _tema_macd_state(
+            daily_tema, daily_macd, daily_signal, daily_state_before, _ = compute_tema_macd_state(
                 daily_close, tema_config
             )
-            _, _, _, _, weekly_state_after = _tema_macd_state(weekly_close, tema_config)
+            _, _, _, _, weekly_state_after = compute_tema_macd_state(weekly_close, tema_config)
 
             if (
                 np.isnan(daily_tema[daily_idx])
@@ -146,7 +136,7 @@ def scan_tema_macd_projection_cone(
             ):
                 continue
 
-            daily_fresh_buy = (
+            daily_fresh_buy = bool(
                 daily_tema[daily_idx] >= daily_tema[daily_idx - 1]
                 and not daily_state_before[daily_idx]
                 and daily_macd[daily_idx] >= daily_signal[daily_idx]
@@ -182,6 +172,7 @@ def scan_tema_macd_projection_cone(
 def build_markdown_report(
     matches: list[TemaMacdProjectionConeMatch], *, min_negative_sigma: float
 ) -> str:
+    """Render markdown report for TEMA-MACD MTF + Projection Cone scanner results."""
     ordered_matches = sorted(matches, key=lambda match: (float(match.sigma_move), match.ticker))
     sections = [
         "## TEMA MACD D in W + Projection Cone D",

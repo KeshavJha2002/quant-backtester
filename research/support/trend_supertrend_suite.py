@@ -55,13 +55,13 @@ def _metrics_from_trades(trades: list[dict[str, float]], label: str) -> dict[str
 def _append_trade(
     trades: list[dict[str, float]], entry_price: float, exit_price: float, entry_time, exit_time
 ) -> None:
-    duration = pd.Timestamp(exit_time) - pd.Timestamp(entry_time)
+    duration_seconds = (pd.to_datetime(exit_time) - pd.to_datetime(entry_time)).total_seconds()
     trades.append(
         {
             "entry_price": entry_price,
             "exit_price": exit_price,
             "return_pct": (exit_price / entry_price - 1.0) * 100.0,
-            "duration_days": float(duration / pd.Timedelta(days=1)),
+            "duration_days": float(duration_seconds / 86400.0),
         }
     )
 

@@ -1,17 +1,38 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
-from trading_bot.projection_cone import ProjectionConeConfig, analyze_projection_cone
-from trading_bot.utility import (
-    ensure_output_dir,
-    get_fetch_data,
-    nifty50_ns,
-    nifty150_ns,
-    nifty250_ns,
+import pandas as pd
+
+from trading_bot.projection_cone import (
+    ProjectionConeConfig,
+    analyze_projection_cone,
+    get_sigma_bucket,
 )
+from trading_bot.utility import (
+    UNIVERSES,
+    ensure_output_dir,
+    get_complete_data,
+    get_fetch_data,
+)
+
+__all__ = [
+    "UNIVERSES",
+    "StrategyContext",
+    "StrategyReportSection",
+    "get_fetcher",
+    "get_complete_bar_fetcher",
+    "build_strategy_section",
+    "write_section_report",
+    "build_combined_report_filename",
+    "render_combined_report",
+    "ticker_cell",
+    "scan_projection_cone_latest",
+    "_sigma_bucket",
+]
 
 
 @dataclass(frozen=True)
@@ -29,20 +50,27 @@ class StrategyReportSection:
     content: str
 
 
-UNIVERSES: list[tuple[str, list[str]]] = [
-    ("N50", nifty50_ns),
-    ("N150", nifty150_ns),
-    ("N250", nifty250_ns),
-]
-
-
-def get_fetcher(refresh_data: bool):
+def get_fetcher(refresh_data: bool) -> Callable[[str, str, str], pd.DataFrame]:
+    """Get market data fetcher with specified refresh policy."""
     return get_fetch_data(refresh=refresh_data)
+
+
+def get_complete_bar_fetcher(
+    base_fetcher: Callable[..., pd.DataFrame],
+) -> Callable[..., pd.DataFrame]:
+    """Wrap a data fetcher to automatically truncate data to the latest complete bar."""
+
+    def _fetcher(ticker: str, *, type: str = "W", start: str = "1990-01-01") -> pd.DataFrame:
+        data, _ = get_complete_data(base_fetcher, ticker, type)
+        return data
+
+    return _fetcher
 
 
 def build_strategy_section(
     mode: str, strategy_number: int, title: str, content: str
 ) -> StrategyReportSection:
+    """Build a report section object for a strategy."""
     return StrategyReportSection(
         mode=mode,
         strategy_number=strategy_number,
@@ -52,6 +80,7 @@ def build_strategy_section(
 
 
 def write_section_report(section: StrategyReportSection) -> str:
+    """Write an individual strategy report section to disk under report/<date>/."""
     report_date = datetime.now().strftime("%Y-%m-%d")
     output_dir = ensure_output_dir("report", report_date)
     output_path = output_dir / build_combined_report_filename(
@@ -62,12 +91,14 @@ def write_section_report(section: StrategyReportSection) -> str:
 
 
 def build_combined_report_filename(mode: str, strategy_numbers: list[int]) -> str:
+    """Build standardized report filename for given mode and list of strategy numbers."""
     ordered = sorted(dict.fromkeys(strategy_numbers))
     strategy_token = "_".join(str(value) for value in ordered)
     return f"{mode}_{strategy_token}.md"
 
 
 def render_combined_report(sections: list[StrategyReportSection]) -> str:
+    """Render multiple strategy report sections into a single markdown document."""
     generated_at = datetime.now().isoformat(timespec="seconds")
     lines = [
         "# Strategy Runner Report",
@@ -88,17 +119,19 @@ def render_combined_report(sections: list[StrategyReportSection]) -> str:
 
 
 def ticker_cell(values: list[str]) -> str:
+    """Format a list of tickers as a backticked comma-separated cell in a markdown table."""
     return ", ".join(f"`{value}`" for value in values) if values else "-"
 
 
 def scan_projection_cone_latest(
     tickers: list[str],
-    fetch_data_func,
+    fetch_data_func: Callable[..., pd.DataFrame],
     *,
     segment: str,
     freq: str,
     cone_config: ProjectionConeConfig | None = None,
 ) -> list[dict[str, Any]]:
+    """Scan tickers for latest projection cone status."""
     cone_config = cone_config or ProjectionConeConfig(lock_mode=True, lock_to_bull=False)
     rows: list[dict[str, Any]] = []
     for ticker in tickers:
@@ -116,7 +149,7 @@ def scan_projection_cone_latest(
                     "bar_time": result["as_of"],
                     "current_price": result["current_price"],
                     "sigma_move": result["zone"]["sigma_move"],
-                    "sigma_bucket": _sigma_bucket(result["zone"]["sigma_move"]),
+                    "sigma_bucket": get_sigma_bucket(result["zone"]["sigma_move"], unicode_symbol=True),
                     "price_zone": result["zone"]["name"],
                     "anchor_type": result["anchor"]["type"],
                     "anchor_price": result["anchor"]["price"],
@@ -127,19 +160,5 @@ def scan_projection_cone_latest(
     return rows
 
 
-def _sigma_bucket(sigma_move: float) -> str:
-    if sigma_move < -3.0:
-        return "< -3σ"
-    if sigma_move < -2.0:
-        return "-3σ to -2σ"
-    if sigma_move < -1.0:
-        return "-2σ to -1σ"
-    if sigma_move < 0.0:
-        return "-1σ to 0σ"
-    if sigma_move < 1.0:
-        return "0σ to +1σ"
-    if sigma_move < 2.0:
-        return "+1σ to +2σ"
-    if sigma_move < 3.0:
-        return "+2σ to +3σ"
-    return "> +3σ"
+# Backward-compatible alias
+_sigma_bucket = get_sigma_bucket

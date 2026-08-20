@@ -4,14 +4,13 @@ from trading_bot.strategy.common import (
     UNIVERSES,
     StrategyContext,
     build_strategy_section,
+    get_fetcher,
     scan_projection_cone_latest,
     write_section_report,
 )
 
 
 def build_section(context: StrategyContext):
-    from trading_bot.strategy.common import get_fetcher
-
     fetcher = get_fetcher(context.refresh_data)
     sections = []
     for freq in ("D", "W"):

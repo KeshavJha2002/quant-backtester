@@ -7,22 +7,20 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from trading_bot.projection_cone import ProjectionConeConfig, analyze_projection_cone
-from trading_bot.tema_macd.strategy import _latest_complete_bar_index, _tema_macd_state
+from trading_bot.projection_cone import (
+    ProjectionConeConfig,
+    analyze_projection_cone,
+)
+from trading_bot.tema_macd.strategy import compute_tema_macd_state
 from trading_bot.utility import (
     compute_st_trend_from_config,
+    compute_triple_supertrend,
     config,
+    detect_universe,
+    get_complete_data,
     get_fetch_data,
-    nifty50_ns,
-    nifty150_ns,
-    nifty250_ns,
+    normalize_ticker,
 )
-
-UNIVERSE_MAP = {
-    "N50": set(nifty50_ns),
-    "N150": set(nifty150_ns),
-    "N250": set(nifty250_ns),
-}
 
 
 @dataclass(frozen=True)
@@ -44,38 +42,20 @@ class PositionDecision:
     context: dict[str, Any]
 
 
-def normalize_ticker(raw_ticker: str) -> str:
-    ticker = raw_ticker.strip().upper()
-    if not ticker.endswith(".NS"):
-        ticker = f"{ticker}.NS"
-    return ticker
-
-
-def detect_universe(ticker: str) -> str:
-    memberships = [name for name, tickers in UNIVERSE_MAP.items() if ticker in tickers]
-    return ", ".join(memberships) if memberships else "Custom"
-
-
 def get_cached_fetcher():
+    """Get market data fetcher with local caching enabled."""
     return get_fetch_data(refresh=False)
 
 
-def get_complete_data(fetch_data_func, ticker: str, freq: str) -> tuple[pd.DataFrame, int]:
-    data = fetch_data_func(ticker, type=freq).reset_index(drop=True)
-    idx = _latest_complete_bar_index(np.asarray(data["time"].values), freq)
-    if idx is None or idx <= 0:
-        raise ValueError(f"No complete {freq} bar available for {ticker}")
-    return data.iloc[: idx + 1].reset_index(drop=True), idx
-
-
 def tema_state_snapshot(fetch_data_func, ticker: str, freq: str) -> dict[str, Any]:
+    """Capture snapshot of TEMA-MACD state on the latest completed bar."""
     data, idx = get_complete_data(fetch_data_func, ticker, freq)
     close = np.asarray(data["close"].values, dtype=float).ravel()
 
     if len(close) < max(config["tema_len"], config["macd_slow"]) + 5:
         raise ValueError(f"Not enough {freq} data for {ticker}")
 
-    tema, macd, signal, state_before_bar, state_after_bar = _tema_macd_state(close, config)
+    tema, macd, signal, state_before_bar, state_after_bar = compute_tema_macd_state(close, config)
     if np.isnan(tema[idx]) or np.isnan(macd[idx]) or np.isnan(signal[idx]):
         raise ValueError(f"Indicator values unavailable for {ticker} {freq}")
 
@@ -104,9 +84,7 @@ def _supertrend_or_snapshot(data: pd.DataFrame) -> dict[str, Any]:
     high = np.asarray(data["high"].values, float).ravel()
     low = np.asarray(data["low"].values, float).ravel()
 
-    trend1 = compute_st_trend_from_config(close, high, low, 10, 3.0, 1)
-    trend2 = compute_st_trend_from_config(close, high, low, 14, 3.0, 2)
-    trend3 = compute_st_trend_from_config(close, high, low, 14, 3.5, 3)
+    trend1, trend2, trend3 = compute_triple_supertrend(close, high, low)
     idx = len(close) - 1
     fresh_buy = bool(
         (trend1[idx - 1] == -1 and trend1[idx] == 1)
@@ -161,6 +139,7 @@ def _supertrend_pullback_snapshot(data: pd.DataFrame, grace_lb: int = 2) -> dict
 
 
 def supertrend_state_snapshot(fetch_data_func, ticker: str, freq: str) -> dict[str, Any]:
+    """Capture snapshot of Supertrend state on the latest completed bar."""
     data, idx = get_complete_data(fetch_data_func, ticker, freq)
     if freq == "D":
         result = _supertrend_pullback_snapshot(data)
@@ -174,6 +153,7 @@ def supertrend_state_snapshot(fetch_data_func, ticker: str, freq: str) -> dict[s
 
 
 def cone_snapshot(fetch_data_func, ticker: str, freq: str) -> dict[str, Any]:
+    """Capture snapshot of projection cone state on the latest completed bar."""
     cone_config = ProjectionConeConfig(lock_mode=True, lock_to_bull=False)
 
     def complete_fetcher(request_ticker: str, *, type: str):
@@ -196,6 +176,7 @@ def cone_snapshot(fetch_data_func, ticker: str, freq: str) -> dict[str, Any]:
 
 
 def build_ticker_strategy_snapshot(ticker: str) -> dict[str, Any]:
+    """Build multi-strategy status snapshot for a single ticker."""
     normalized_ticker = normalize_ticker(ticker)
     fetcher = get_cached_fetcher()
 
@@ -333,6 +314,7 @@ def build_ticker_strategy_snapshot(ticker: str) -> dict[str, Any]:
 
 
 def evaluate_combination_position(ticker: str, strategy_no: int) -> PositionDecision:
+    """Evaluate hold/sell decision for an open combination strategy position."""
     normalized_ticker = normalize_ticker(ticker)
     fetcher = get_cached_fetcher()
 
@@ -408,6 +390,7 @@ def evaluate_combination_position(ticker: str, strategy_no: int) -> PositionDeci
 
 
 def format_snapshot_markdown(snapshot: dict[str, Any]) -> str:
+    """Format strategy match snapshot as markdown report."""
     lines = [
         f"# Strategy Snapshot: {snapshot['ticker']}",
         f"- Universe: `{snapshot['universe']}`",
@@ -443,6 +426,7 @@ def format_snapshot_markdown(snapshot: dict[str, Any]) -> str:
 
 
 def format_position_decisions_markdown(decisions: list[PositionDecision]) -> str:
+    """Format position hold/sell decisions as markdown table."""
     lines = [
         "# Combination Position Decisions",
         "",
@@ -460,6 +444,7 @@ def format_position_decisions_markdown(decisions: list[PositionDecision]) -> str
 
 
 def parse_pairs(raw_pairs: list[str]) -> list[tuple[str, int]]:
+    """Parse list of strings in format 'TICKER:STRATEGY_NO'."""
     parsed: list[tuple[str, int]] = []
     for raw_pair in raw_pairs:
         ticker_token, strategy_token = [value.strip() for value in raw_pair.split(":", 1)]
@@ -468,6 +453,7 @@ def parse_pairs(raw_pairs: list[str]) -> list[tuple[str, int]]:
 
 
 def parse_pairs_json(raw_json: str) -> list[tuple[str, int]]:
+    """Parse JSON array of [ticker, strategy_no] pairs."""
     payload = json.loads(raw_json)
     parsed: list[tuple[str, int]] = []
     for item in payload:

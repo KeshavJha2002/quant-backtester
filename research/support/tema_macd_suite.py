@@ -79,13 +79,13 @@ def backtest_tema_macd_strategy(data) -> list[dict[str, float]]:
             last_tran = False
             if in_position and entry_time is not None:
                 exit_price = float(close[i])
-                duration = pd.Timestamp(time_values[i]) - pd.Timestamp(entry_time)
+                duration_seconds = (pd.to_datetime(time_values[i]) - pd.to_datetime(entry_time)).total_seconds()
                 trades.append(
                     {
                         "entry_price": entry_price,
                         "exit_price": exit_price,
                         "return_pct": (exit_price / entry_price - 1.0) * 100.0,
-                        "duration_days": float(duration / pd.Timedelta(days=1)),
+                        "duration_days": float(duration_seconds / 86400.0),
                     }
                 )
                 in_position = False
@@ -179,13 +179,13 @@ def backtest_tema_macd_mtf_strategy(daily_data, weekly_data) -> list[dict[str, f
             last_tran = False
             if in_position and entry_time is not None:
                 exit_price = float(daily_close[i])
-                duration = pd.Timestamp(daily_time[i]) - pd.Timestamp(entry_time)
+                duration_seconds = (pd.to_datetime(daily_time[i]) - pd.to_datetime(entry_time)).total_seconds()
                 trades.append(
                     {
                         "entry_price": entry_price,
                         "exit_price": exit_price,
                         "return_pct": (exit_price / entry_price - 1.0) * 100.0,
-                        "duration_days": float(duration / pd.Timedelta(days=1)),
+                        "duration_days": float(duration_seconds / 86400.0),
                     }
                 )
                 in_position = False

@@ -6,12 +6,10 @@ from pathlib import Path
 
 from trading_bot.supertrend.strategy import run_supertrend_scans
 from trading_bot.utility import (
+    UNIVERSES,
     append_shared_report,
     fetch_data,
     get_fetch_data,
-    nifty50_ns,
-    nifty150_ns,
-    nifty250_ns,
     shared_report_output_path,
 )
 
@@ -20,22 +18,19 @@ def _ticker_cell(values: list[str]) -> str:
     return ", ".join(f"`{value}`" for value in values) if values else "-"
 
 
-def build_supertrend_report(fetch_data_func=fetch_data) -> str:
+def build_supertrend_report(
+    fetch_data_func=fetch_data,
+    universes: list[tuple[str, list[str]]] | None = None,
+) -> str:
     as_of = datetime.now().isoformat(timespec="seconds")
     sections = ["## Supertrend", f"- Generated: `{as_of}`", ""]
 
-    _, recent_n50_5_d, _ = run_supertrend_scans(nifty50_ns, fetch_data_func, "D", mode="pullback")
-    _, recent_n150_5_d, _ = run_supertrend_scans(nifty150_ns, fetch_data_func, "D", mode="pullback")
-    _, recent_n250_5_d, _ = run_supertrend_scans(nifty250_ns, fetch_data_func, "D", mode="pullback")
-    _, _, recent_n50_2_w = run_supertrend_scans(nifty50_ns, fetch_data_func, "W", mode="or")
-    _, _, recent_n150_2_w = run_supertrend_scans(nifty150_ns, fetch_data_func, "W", mode="or")
-    _, _, recent_n250_2_w = run_supertrend_scans(nifty250_ns, fetch_data_func, "W", mode="or")
-
-    rows = [
-        ("N50", recent_n50_5_d["D"], recent_n50_2_w["W"]),
-        ("N150", recent_n150_5_d["D"], recent_n150_2_w["W"]),
-        ("N250", recent_n250_5_d["D"], recent_n250_2_w["W"]),
-    ]
+    target_universes = universes if universes is not None else UNIVERSES
+    rows = []
+    for segment, tickers in target_universes:
+        _, recent_d, _ = run_supertrend_scans(tickers, fetch_data_func, "D", mode="pullback")
+        _, _, recent_w = run_supertrend_scans(tickers, fetch_data_func, "W", mode="or")
+        rows.append((segment, recent_d["D"], recent_w["W"]))
 
     sections.extend(
         [
@@ -67,8 +62,12 @@ def run_supertrend_report(
     report_path: Path | None = None,
     *,
     refresh_data: bool = False,
+    universes: list[tuple[str, list[str]]] | None = None,
 ) -> str:
-    report = build_supertrend_report(fetch_data_func=get_fetch_data(refresh=refresh_data))
+    report = build_supertrend_report(
+        fetch_data_func=get_fetch_data(refresh=refresh_data),
+        universes=universes,
+    )
     if report_path is None:
         report_path = shared_report_output_path(datetime.now().strftime("%Y-%m-%d"))
     append_shared_report(report_path, report)
