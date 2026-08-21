@@ -45,6 +45,8 @@ export interface PositionEvaluation {
 
   reasoningSummary: string;
   structuralDetails: string[];
+  isLive?: boolean;
+  lastUpdated?: string;
 }
 
 export interface SizingRecommendation {
@@ -89,4 +91,5 @@ export interface ScanResult {
   volumeRatio: number;
   score: number;
   signalDetails: string;
+  isLive?: boolean;
 }

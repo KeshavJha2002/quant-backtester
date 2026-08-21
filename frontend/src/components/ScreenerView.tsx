@@ -6,10 +6,13 @@ import {
   Sliders,
   Sparkles,
   Zap,
+  RefreshCw,
+  Clock,
+  ShieldCheck,
 } from 'lucide-react';
 import { ScanResult } from '../types';
 import { NIFTY_50_TICKERS, NIFTY_MIDCAP_150_TICKERS, NIFTY_SMALLCAP_250_TICKERS } from '../services/constants';
-import { fetchStockCandles } from '../services/marketData';
+import { fetchStockCandlesWithMeta } from '../services/marketData';
 import {
   computeSupertrend,
   computeTripleSupertrend,
@@ -27,15 +30,19 @@ export const ScreenerView: React.FC<ScreenerViewProps> = ({
   onSizeStockFromScan,
 }) => {
   const [universe, setUniverse] = useState<'N150' | 'N250' | 'N50' | 'ALL'>('N150');
+  const [forceLiveRefresh, setForceLiveRefresh] = useState(true);
   const [isScanning, setIsScanning] = useState(false);
   const [dailyResults, setDailyResults] = useState<ScanResult[]>([]);
   const [weeklyResults, setWeeklyResults] = useState<ScanResult[]>([]);
   const [scanProgress, setScanProgress] = useState<string>('');
+  const [progressPercent, setProgressPercent] = useState<number>(0);
+  const [lastScanTime, setLastScanTime] = useState<string | null>(null);
 
   const runScreener = async () => {
     setIsScanning(true);
     setDailyResults([]);
     setWeeklyResults([]);
+    setProgressPercent(0);
 
     const tickers =
       universe === 'N150'
@@ -49,94 +56,108 @@ export const ScreenerView: React.FC<ScreenerViewProps> = ({
     const dailyHits: ScanResult[] = [];
     const weeklyHits: ScanResult[] = [];
 
-    for (let i = 0; i < tickers.length; i++) {
-      const t = tickers[i];
-      setScanProgress(`Scanning ${i + 1}/${tickers.length}: ${t}...`);
+    // Scan in small concurrent batches of 4 for speed & stability
+    const batchSize = 4;
+    for (let i = 0; i < tickers.length; i += batchSize) {
+      const batch = tickers.slice(i, i + batchSize);
+      const pct = Math.round(((i + batch.length) / tickers.length) * 100);
+      setProgressPercent(pct);
+      setScanProgress(`Scanning ${i + 1}-${Math.min(i + batchSize, tickers.length)} of ${tickers.length} (${batch.join(', ')})...`);
 
-      try {
-        const [dCandles, wCandles] = await Promise.all([
-          fetchStockCandles(t, '1d', '1y'),
-          fetchStockCandles(t, '1wk', '2y'),
-        ]);
+      await Promise.all(
+        batch.map(async (t) => {
+          try {
+            const [dRes, wRes] = await Promise.all([
+              fetchStockCandlesWithMeta(t, '1d', '1y', forceLiveRefresh),
+              fetchStockCandlesWithMeta(t, '1wk', '2y', forceLiveRefresh),
+            ]);
 
-        if (dCandles.length < 50 || wCandles.length < 20) continue;
+            const dCandles = dRes.candles;
+            const wCandles = wRes.candles;
 
-        const dClose = dCandles.map((c) => c.close);
-        const dHigh = dCandles.map((c) => c.high);
-        const dLow = dCandles.map((c) => c.low);
-        const dn = dClose.length;
+            if (dCandles.length < 30 || wCandles.length < 15) return;
 
-        const wClose = wCandles.map((c) => c.close);
-        const wHigh = wCandles.map((c) => c.high);
-        const wLow = wCandles.map((c) => c.low);
+            const dClose = dCandles.map((c) => c.close);
+            const dHigh = dCandles.map((c) => c.high);
+            const dLow = dCandles.map((c) => c.low);
+            const dn = dClose.length;
 
-        // Weekly Bull Trend
-        const [wt1, wt2, wt3] = computeTripleSupertrend(wClose, wHigh, wLow);
-        const weeklyBull =
-          wt1.length > 0 && (wt1[wt1.length - 1] === 1 || wt2[wt2.length - 1] === 1 || wt3[wt3.length - 1] === 1);
+            const wClose = wCandles.map((c) => c.close);
+            const wHigh = wCandles.map((c) => c.high);
+            const wLow = wCandles.map((c) => c.low);
 
-        // Daily Supertrend & SMA
-        const dFast = computeSupertrend(dClose, dHigh, dLow, 10, 3.0);
-        const dSlow = computeSupertrend(dClose, dHigh, dLow, 14, 3.5);
-        const sma200Arr = sma(dClose, Math.min(200, Math.floor(dn / 2)));
-        const sma200 = sma200Arr[sma200Arr.length - 1];
+            // 1. Weekly Multi-Scale Supertrend Bull Confirmation
+            const [wt1, wt2, wt3] = computeTripleSupertrend(wClose, wHigh, wLow);
+            const weeklyBull =
+              wt1.length > 0 &&
+              (wt1[wt1.length - 1] === 1 || wt2[wt2.length - 1] === 1 || wt3[wt3.length - 1] === 1);
 
-        const dSigma = computeConeSigmaForBar(dHigh, dLow, dClose, 'D', 20, 10);
-        const lastFast = dFast.trend[dFast.trend.length - 1];
-        const prevFast = dFast.trend[dFast.trend.length - 2];
-        const lastSlow = dSlow.trend[dSlow.trend.length - 1];
+            // 2. Daily Supertrend & Moving Averages
+            const dFast = computeSupertrend(dClose, dHigh, dLow, 10, 3.0);
+            const dSlow = computeSupertrend(dClose, dHigh, dLow, 14, 3.5);
+            const sma200Arr = sma(dClose, Math.min(200, Math.floor(dn / 2)));
+            const sma200 = sma200Arr[sma200Arr.length - 1];
 
-        // Daily C7 Trigger: Pullback in Weekly Bull + Discount
-        if (
-          weeklyBull &&
-          prevFast === -1 &&
-          lastFast === 1 &&
-          lastSlow === 1 &&
-          dClose[dn - 1] >= (isNaN(sma200) ? 0 : sma200 * 0.98) &&
-          dSigma <= 0.0
-        ) {
-          const score = (1.0 + (0 - dSigma) / 1.5) * 1.2;
-          dailyHits.push({
-            timeframe: 'Daily',
-            segment: universe,
-            ticker: t,
-            barDate: dCandles[dn - 1].time,
-            closePrice: dClose[dn - 1],
-            sigmaMove: dSigma,
-            adxValue: 22.0,
-            volumeRatio: 1.25,
-            score,
-            signalDetails: 'ST Pullback Buy in Weekly Bull + Discount',
-          });
-        }
+            const dSigma = computeConeSigmaForBar(dHigh, dLow, dClose, 'D', 20, 10);
+            const lastFast = dFast.trend[dFast.trend.length - 1];
+            const prevFast = dFast.trend[dFast.trend.length - 2];
+            const lastSlow = dSlow.trend[dSlow.trend.length - 1];
 
-        // Weekly C6 Trigger: Fresh Weekly Supertrend Breakout
-        const w1Last = wt1[wt1.length - 1];
-        const w1Prev = wt1[wt1.length - 2];
-        const w2Last = wt2[wt2.length - 1];
-        const w2Prev = wt2[wt2.length - 2];
+            // Daily C7 Champion Setup: Weekly Bull + Daily Pullback Turn + Discount Zone
+            if (
+              weeklyBull &&
+              prevFast === -1 &&
+              lastFast === 1 &&
+              lastSlow === 1 &&
+              dClose[dn - 1] >= (isNaN(sma200) ? 0 : sma200 * 0.98) &&
+              dSigma <= 0.0
+            ) {
+              const score = (1.0 + (0 - dSigma) / 1.5) * 1.25;
+              dailyHits.push({
+                timeframe: 'Daily',
+                segment: universe,
+                ticker: t,
+                barDate: dCandles[dn - 1].time,
+                closePrice: dClose[dn - 1],
+                sigmaMove: dSigma,
+                adxValue: 22.0,
+                volumeRatio: 1.25,
+                score,
+                signalDetails: 'ST Pullback Turn in Weekly Bull + Discount',
+                isLive: dRes.isLive,
+              });
+            }
 
-        if (
-          ((w1Prev === -1 && w1Last === 1) || (w2Prev === -1 && w2Last === 1)) &&
-          dSigma <= 0.2
-        ) {
-          const score = (1.0 + (0 - dSigma) / 1.5) * 1.1;
-          weeklyHits.push({
-            timeframe: 'Weekly',
-            segment: universe,
-            ticker: t,
-            barDate: wCandles[wCandles.length - 1].time,
-            closePrice: wClose[wClose.length - 1],
-            sigmaMove: dSigma,
-            adxValue: 20.0,
-            volumeRatio: 1.1,
-            score,
-            signalDetails: 'Weekly Supertrend Breakout + Value',
-          });
-        }
-      } catch {
-        // Continue
-      }
+            // Weekly C6 Champion Setup: Multi-Scale Supertrend Weekly Breakout
+            const w1Last = wt1[wt1.length - 1];
+            const w1Prev = wt1[wt1.length - 2];
+            const w2Last = wt2[wt2.length - 1];
+            const w2Prev = wt2[wt2.length - 2];
+
+            if (
+              ((w1Prev === -1 && w1Last === 1) || (w2Prev === -1 && w2Last === 1)) &&
+              dSigma <= 0.2
+            ) {
+              const score = (1.0 + (0 - dSigma) / 1.5) * 1.15;
+              weeklyHits.push({
+                timeframe: 'Weekly',
+                segment: universe,
+                ticker: t,
+                barDate: wCandles[wCandles.length - 1].time,
+                closePrice: wClose[wClose.length - 1],
+                sigmaMove: dSigma,
+                adxValue: 20.0,
+                volumeRatio: 1.1,
+                score,
+                signalDetails: 'Weekly Supertrend Breakout + Value',
+                isLive: wRes.isLive,
+              });
+            }
+          } catch {
+            // Ignore failure for single ticker
+          }
+        })
+      );
     }
 
     dailyHits.sort((a, b) => b.score - a.score);
@@ -146,6 +167,8 @@ export const ScreenerView: React.FC<ScreenerViewProps> = ({
     setWeeklyResults(weeklyHits);
     setIsScanning(false);
     setScanProgress('');
+    setProgressPercent(100);
+    setLastScanTime(new Date().toLocaleTimeString());
   };
 
   return (
@@ -153,16 +176,30 @@ export const ScreenerView: React.FC<ScreenerViewProps> = ({
       {/* Screener Controls */}
       <div className="bg-slate-900 border border-slate-800 p-5 rounded-2xl flex flex-col md:flex-row items-center justify-between gap-4">
         <div>
-          <h2 className="text-base font-bold text-slate-100 flex items-center gap-2">
+          <div className="flex items-center gap-2">
             <Compass className="w-5 h-5 text-cyan-400" />
-            <span>Champion Strategy Screener</span>
-          </h2>
-          <p className="text-xs text-slate-400">
-            Multi-timeframe scanner evaluating strictly on the latest closed candle
+            <h2 className="text-base font-bold text-slate-100">Champion Multi-Timeframe Screener</h2>
+          </div>
+          <p className="text-xs text-slate-400 mt-0.5">
+            Evaluates Daily C7 & Weekly C6 champions on the latest closed candle with live ranking
           </p>
         </div>
 
-        <div className="flex items-center gap-3 w-full md:w-auto">
+        <div className="flex flex-wrap items-center gap-3 w-full md:w-auto">
+          {/* Live Refresh Checkbox */}
+          <label className="flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-950 border border-slate-800 text-xs text-slate-300 cursor-pointer select-none">
+            <input
+              type="checkbox"
+              checked={forceLiveRefresh}
+              onChange={(e) => setForceLiveRefresh(e.target.checked)}
+              className="rounded bg-slate-900 border-slate-700 text-cyan-500 focus:ring-0"
+            />
+            <span className="flex items-center gap-1">
+              <Zap className={`w-3.5 h-3.5 ${forceLiveRefresh ? 'text-amber-400' : 'text-slate-500'}`} />
+              <span>Pull Live Yahoo Data (--refresh)</span>
+            </span>
+          </label>
+
           <select
             value={universe}
             onChange={(e) => setUniverse(e.target.value as any)}
@@ -181,8 +218,8 @@ export const ScreenerView: React.FC<ScreenerViewProps> = ({
           >
             {isScanning ? (
               <>
-                <Zap className="w-4 h-4 animate-bounce" />
-                <span>Scanning...</span>
+                <RefreshCw className="w-4 h-4 animate-spin" />
+                <span>Scanning {progressPercent}%...</span>
               </>
             ) : (
               <>
@@ -194,10 +231,36 @@ export const ScreenerView: React.FC<ScreenerViewProps> = ({
         </div>
       </div>
 
-      {scanProgress && (
-        <div className="p-3 bg-cyan-950/40 border border-cyan-500/30 rounded-xl text-xs text-cyan-300 font-mono flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-          <span>{scanProgress}</span>
+      {/* Live Scanning Progress Bar */}
+      {isScanning && (
+        <div className="p-4 bg-slate-900/90 border border-cyan-500/30 rounded-2xl space-y-2">
+          <div className="flex items-center justify-between text-xs font-mono text-cyan-300">
+            <span className="flex items-center gap-2">
+              <span className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
+              <span>{scanProgress}</span>
+            </span>
+            <span className="font-bold">{progressPercent}%</span>
+          </div>
+          <div className="w-full bg-slate-950 rounded-full h-2 overflow-hidden">
+            <div
+              className="bg-gradient-to-r from-cyan-500 to-blue-500 h-2 rounded-full transition-all duration-300"
+              style={{ width: `${progressPercent}%` }}
+            />
+          </div>
+        </div>
+      )}
+
+      {/* Last Scan Status Banner */}
+      {lastScanTime && !isScanning && (
+        <div className="flex items-center justify-between text-xs font-mono px-4 py-2 bg-slate-900/40 border border-slate-800 rounded-xl text-slate-400">
+          <span className="flex items-center gap-1.5">
+            <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Scan Complete: {dailyResults.length} Daily C7 + {weeklyResults.length} Weekly C6 Trigger(s) Found</span>
+          </span>
+          <span className="flex items-center gap-1 text-slate-500">
+            <Clock className="w-3 h-3" />
+            <span>Last Run: {lastScanTime}</span>
+          </span>
         </div>
       )}
 
@@ -238,7 +301,10 @@ export const ScreenerView: React.FC<ScreenerViewProps> = ({
                 {dailyResults.map((res, i) => (
                   <tr key={res.ticker} className="hover:bg-slate-850/60 transition">
                     <td className="py-3 px-3.5 font-bold text-cyan-400">#{i + 1}</td>
-                    <td className="py-3 px-3 font-bold text-slate-100">{res.ticker}</td>
+                    <td className="py-3 px-3">
+                      <span className="font-bold text-slate-100 block">{res.ticker}</span>
+                      <span className="text-[9px] text-slate-500">{res.barDate}</span>
+                    </td>
                     <td className="py-3 px-3 text-right">
                       ₹{res.closePrice.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                     </td>
@@ -249,23 +315,25 @@ export const ScreenerView: React.FC<ScreenerViewProps> = ({
                       {res.score.toFixed(2)}
                     </td>
                     <td className="py-3 px-3 text-slate-300 font-sans text-xs">{res.signalDetails}</td>
-                    <td className="py-3 px-3 text-right flex items-center justify-end gap-2">
-                      <button
-                        onClick={() => onSizeStockFromScan(res.ticker)}
-                        className="px-2.5 py-1 rounded-lg text-xs font-sans font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition flex items-center gap-1"
-                        title="Calculate optimal shares with Position Sizer"
-                      >
-                        <Sliders className="w-3 h-3 text-cyan-400" />
-                        <span>Size</span>
-                      </button>
-                      <button
-                        onClick={() => onAddStockFromScan(res.ticker)}
-                        className="px-2.5 py-1 rounded-lg text-xs font-sans font-medium bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 transition flex items-center gap-1"
-                        title="Add directly to portfolio"
-                      >
-                        <Plus className="w-3 h-3" />
-                        <span>Add</span>
-                      </button>
+                    <td className="py-3 px-3 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => onSizeStockFromScan(res.ticker)}
+                          className="px-2.5 py-1 rounded-lg text-xs font-sans font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition flex items-center gap-1"
+                          title="Calculate optimal shares with Position Sizer"
+                        >
+                          <Sliders className="w-3 h-3 text-cyan-400" />
+                          <span>Size</span>
+                        </button>
+                        <button
+                          onClick={() => onAddStockFromScan(res.ticker)}
+                          className="px-2.5 py-1 rounded-lg text-xs font-sans font-medium bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 transition flex items-center gap-1"
+                          title="Add directly to portfolio"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Add</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -274,7 +342,7 @@ export const ScreenerView: React.FC<ScreenerViewProps> = ({
           </div>
         ) : (
           <div className="text-center py-10 text-xs text-slate-500 font-sans">
-            No daily buy triggers on the latest closed candle. Click "Run Live Scan" to refresh.
+            No daily buy triggers on the latest closed candle. Click "Run Live Scan" with "Pull Live Yahoo Data" enabled to refresh.
           </div>
         )}
       </div>
@@ -316,7 +384,10 @@ export const ScreenerView: React.FC<ScreenerViewProps> = ({
                 {weeklyResults.map((res, i) => (
                   <tr key={res.ticker} className="hover:bg-slate-850/60 transition">
                     <td className="py-3 px-3.5 font-bold text-cyan-400">#{i + 1}</td>
-                    <td className="py-3 px-3 font-bold text-slate-100">{res.ticker}</td>
+                    <td className="py-3 px-3">
+                      <span className="font-bold text-slate-100 block">{res.ticker}</span>
+                      <span className="text-[9px] text-slate-500">{res.barDate}</span>
+                    </td>
                     <td className="py-3 px-3 text-right">
                       ₹{res.closePrice.toLocaleString('en-IN', { maximumFractionDigits: 2 })}
                     </td>
@@ -327,21 +398,23 @@ export const ScreenerView: React.FC<ScreenerViewProps> = ({
                       {res.score.toFixed(2)}
                     </td>
                     <td className="py-3 px-3 text-slate-300 font-sans text-xs">{res.signalDetails}</td>
-                    <td className="py-3 px-3 text-right flex items-center justify-end gap-2">
-                      <button
-                        onClick={() => onSizeStockFromScan(res.ticker)}
-                        className="px-2.5 py-1 rounded-lg text-xs font-sans font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition flex items-center gap-1"
-                      >
-                        <Sliders className="w-3 h-3 text-cyan-400" />
-                        <span>Size</span>
-                      </button>
-                      <button
-                        onClick={() => onAddStockFromScan(res.ticker)}
-                        className="px-2.5 py-1 rounded-lg text-xs font-sans font-medium bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 transition flex items-center gap-1"
-                      >
-                        <Plus className="w-3 h-3" />
-                        <span>Add</span>
-                      </button>
+                    <td className="py-3 px-3 text-right">
+                      <div className="flex items-center justify-end gap-2">
+                        <button
+                          onClick={() => onSizeStockFromScan(res.ticker)}
+                          className="px-2.5 py-1 rounded-lg text-xs font-sans font-medium bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition flex items-center gap-1"
+                        >
+                          <Sliders className="w-3 h-3 text-cyan-400" />
+                          <span>Size</span>
+                        </button>
+                        <button
+                          onClick={() => onAddStockFromScan(res.ticker)}
+                          className="px-2.5 py-1 rounded-lg text-xs font-sans font-medium bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 transition flex items-center gap-1"
+                        >
+                          <Plus className="w-3 h-3" />
+                          <span>Add</span>
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
@@ -350,7 +423,7 @@ export const ScreenerView: React.FC<ScreenerViewProps> = ({
           </div>
         ) : (
           <div className="text-center py-10 text-xs text-slate-500 font-sans">
-            No weekly breakout triggers on the latest closed candle. Click "Run Live Scan" to refresh.
+            No weekly breakout triggers on the latest closed candle. Click "Run Live Scan" with "Pull Live Yahoo Data" enabled to refresh.
           </div>
         )}
       </div>

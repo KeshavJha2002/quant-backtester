@@ -7,6 +7,7 @@ import { TieBreakerView } from './components/TieBreakerView';
 import { ChartView } from './components/ChartView';
 import { BudgetModal } from './components/BudgetModal';
 import { AddStockModal } from './components/AddStockModal';
+import { AdjustPositionModal } from './components/AdjustPositionModal';
 import { Holding, PositionEvaluation } from './types';
 import {
   getStoredHoldings,
@@ -18,7 +19,7 @@ import {
   exportHoldingsCsv,
   parseHoldingsCsv,
 } from './services/storage';
-import { fetchStockCandles } from './services/marketData';
+import { fetchStockCandlesWithMeta } from './services/marketData';
 import { evaluateHolding } from './quant/evaluator';
 
 export const App: React.FC = () => {
@@ -34,6 +35,7 @@ export const App: React.FC = () => {
   // Modals
   const [isBudgetModalOpen, setIsBudgetModalOpen] = useState(false);
   const [isAddStockModalOpen, setIsAddStockModalOpen] = useState(false);
+  const [adjustingEval, setAdjustingEval] = useState<PositionEvaluation | null>(null);
   const [sizerTargetTicker, setSizerTargetTicker] = useState('PETRONET.NS');
 
   // Load initial state from localStorage
@@ -45,7 +47,7 @@ export const App: React.FC = () => {
   }, []);
 
   // Re-evaluate holdings against multi-timeframe quant engine
-  const runEvaluations = useCallback(async (currentHoldings: Holding[]) => {
+  const runEvaluations = useCallback(async (currentHoldings: Holding[], forceLive = false) => {
     if (currentHoldings.length === 0) {
       setEvaluations([]);
       return;
@@ -56,12 +58,14 @@ export const App: React.FC = () => {
 
     for (const h of currentHoldings) {
       try {
-        const [dCandles, wCandles] = await Promise.all([
-          fetchStockCandles(h.ticker, '1d', '1y'),
-          fetchStockCandles(h.ticker, '1wk', '2y'),
+        const [dRes, wRes] = await Promise.all([
+          fetchStockCandlesWithMeta(h.ticker, '1d', '1y', forceLive),
+          fetchStockCandlesWithMeta(h.ticker, '1wk', '2y', forceLive),
         ]);
 
-        const ev = evaluateHolding(h, dCandles, wCandles);
+        const ev = evaluateHolding(h, dRes.candles, wRes.candles);
+        ev.isLive = dRes.isLive;
+        ev.lastUpdated = dRes.lastUpdated;
         evList.push(ev);
       } catch {
         // Fallback evaluation if network fails
@@ -87,6 +91,7 @@ export const App: React.FC = () => {
           healthScore: 50,
           reasoningSummary: 'Evaluating multi-timeframe state...',
           structuralDetails: ['Live data loading...'],
+          isLive: false,
         });
       }
     }
@@ -97,7 +102,7 @@ export const App: React.FC = () => {
 
   useEffect(() => {
     if (holdings.length > 0) {
-      runEvaluations(holdings);
+      runEvaluations(holdings, false);
     }
   }, [holdings, runEvaluations]);
 
@@ -115,6 +120,37 @@ export const App: React.FC = () => {
   const handleDeleteHolding = (ticker: string) => {
     const updated = deleteHolding(ticker);
     setHoldings([...updated]);
+  };
+
+  const handleAdjustPosition = (
+    ticker: string,
+    newQuantity: number,
+    newAvgPrice: number,
+    cashDelta: number,
+    notes?: string
+  ) => {
+    if (newQuantity <= 0) {
+      handleDeleteHolding(ticker);
+    } else {
+      const current = getStoredHoldings();
+      const idx = current.findIndex((h) => h.ticker === ticker);
+      if (idx >= 0) {
+        current[idx] = {
+          ...current[idx],
+          quantity: newQuantity,
+          avgBuyPrice: newAvgPrice,
+          notes: notes || current[idx].notes,
+        };
+        saveHoldings(current);
+        setHoldings([...current]);
+      }
+    }
+
+    if (cashDelta !== 0) {
+      const newCash = Math.max(0, budget.cashBalance + cashDelta);
+      saveBudget(budget.totalBudget, newCash);
+      setBudget((prev) => ({ ...prev, cashBalance: newCash }));
+    }
   };
 
   const handleExportCsv = () => {
@@ -184,7 +220,7 @@ export const App: React.FC = () => {
         currentValue={totalCurrentValue}
         cashBalance={budget.cashBalance}
         onOpenBudgetModal={() => setIsBudgetModalOpen(true)}
-        onRefreshData={() => runEvaluations(holdings)}
+        onRefreshData={() => runEvaluations(holdings, true)}
         isRefreshing={isEvaluating}
       />
 
@@ -193,6 +229,7 @@ export const App: React.FC = () => {
           <PortfolioView
             evaluations={evaluations}
             onOpenAddModal={() => setIsAddStockModalOpen(true)}
+            onOpenAdjustModal={(ev) => setAdjustingEval(ev)}
             onDeletePosition={handleDeleteHolding}
             onExportCsv={handleExportCsv}
             onImportCsv={handleImportCsv}
@@ -238,8 +275,16 @@ export const App: React.FC = () => {
         initialTicker={sizerTargetTicker}
       />
 
+      <AdjustPositionModal
+        isOpen={adjustingEval !== null}
+        onClose={() => setAdjustingEval(null)}
+        evaluation={adjustingEval}
+        onAdjustPosition={handleAdjustPosition}
+        availableCash={budget.cashBalance}
+      />
+
       <footer className="border-t border-slate-900 py-4 px-6 text-center text-xs text-slate-500 font-mono">
-        Quantum Terminal 100% Static Web Edition • Zero-Backend Architecture • All data saved locally in browser
+        Quantum Terminal 100% Client-Side Engine • Multi-Gateway Real-Time Live Feeds • All state preserved in browser
       </footer>
     </div>
   );
